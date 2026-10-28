@@ -1,0 +1,63 @@
+name: Android CI
+
+# 说明：这是一份「零配置」构建脚本，专门给打了补丁的个人分支用。
+# 它会在 CI 里现场生成一个临时签名证书，直接产出可安装的 debug APK，
+# 不需要你自己配置任何 Secrets（原版 release 流程需要 SIGNING_* 四个密钥）。
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'main'
+      - 'master'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build patched APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出仓库代码
+        uses: actions/checkout@v4
+
+      - name: 配置 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 配置 Gradle 缓存
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: 生成临时签名证书
+        run: |
+          mkdir -p keystore
+          keytool -genkeypair -v \
+            -keystore keystore/ci.keystore \
+            -alias ci \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass android -keypass android \
+            -dname "CN=CI, OU=CI, O=CI, L=CI, S=CI, C=CN"
+          {
+            echo "storeFile=keystore/ci.keystore"
+            echo "keyAlias=ci"
+            echo "keyPassword=android"
+            echo "storePassword=android"
+          } > keystore.properties
+
+      - name: 授予 gradlew 执行权限
+        run: chmod +x ./gradlew
+
+      - name: 编译 APK
+        run: ./gradlew --no-daemon :app:assembleDebug
+
+      - name: 上传 APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocationSpoofer-patched
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
